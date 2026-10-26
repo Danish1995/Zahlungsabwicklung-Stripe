@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Stripe Test Payment</title>
+  <script src="https://js.stripe.com/v3/"></script>
+  <style>
+    body { font-family: sans-serif; max-width: 420px; margin: 60px auto; }
+    #card { border: 1px solid #ccc; padding: 12px; border-radius: 6px; margin: 12px 0; }
+    input, button { width: 100%; padding: 10px; margin: 6px 0; box-sizing: border-box; }
+    button { background: #635bff; color: white; border: 0; border-radius: 6px; cursor: pointer; }
+    #log { white-space: pre-wrap; background: #f4f4f4; padding: 10px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <h2>Stripe test payment</h2>
+  <p>Test card: <b>4242 4242 4242 4242</b>, any future date, any CVC</p>
+
+  <input id="name" placeholder="Card holder name" value="Danish Mahmood">
+  <input id="amount" type="number" value="19.99" step="0.01">
+  <div id="card"></div>
+  <button id="pay">Pay</button>
+  <div id="log"></div>
+
+<script>
+  const log = (msg) => document.getElementById('log').textContent += msg + '\n';
+
+  (async () => {
+    // 0) Get the PUBLISHABLE key from our backend and load the Stripe card field
+    const { publishableKey } = await (await fetch('/api/config')).json();
+    const stripe = Stripe(publishableKey);
+    const card = stripe.elements().create('card');
+    card.mount('#card');
+
+    document.getElementById('pay').onclick = async () => {
+      const amountInCents = Math.round(parseFloat(document.getElementById('amount').value) * 100);
+
+      // 1) Ask OUR backend to create a PaymentIntent -> receive client_secret
+      log('1) Backend: creating PaymentIntent for ' + amountInCents + ' cents...');
+      const res = await fetch('/api/payments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ amountInCents })
+      });
+      const data = await res.json();
+      if (!res.ok) { log('Error: ' + data.error); return; }
+      log('   got client_secret');
+
+      // 2) Confirm the payment: card data goes DIRECTLY to Stripe (never to our server)
+      log('2) Stripe: confirming card payment...');
+      const result = await stripe.confirmCardPayment(data.clientSecret, {
+        payment_method: { card, billing_details: { name: document.getElementById('name').value } }
+      });
+
+      if (result.error) {
+        log('   FAILED: ' + result.error.message);
+      } else {
+        log('   Status: ' + result.paymentIntent.status + ' (' + result.paymentIntent.id + ')');
+        log('3) Backend gets the webhook -> order becomes PAID (see server console)');
+      }
+    };
+  })();
+</script>
+</body>
+</html>
